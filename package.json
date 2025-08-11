@@ -1,0 +1,9 @@
+{
+  "type": "module",
+  "dependencies": {
+    "canvas": "^3.1.2",
+    "image-size": "^2.0.2",
+    "muhammara": "^5.3.0",
+    "sharp": "^0.34.3"
+  }
+}
