@@ -3,6 +3,16 @@ import fs from "fs";
 import path from "path";
 import imageSize from "image-size"; // npm install image-size
 
+const instruments = [
+  { file: "Clarinet_in_Bb", title: "Bb" },
+  { file: "Flute", title: "C" },
+];
+
+// Escape instrument for safe use in RegExp
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Group images into the fewest page-sets using First-Fit Decreasing by scaled height
 function groupImagesIntoPages(images, contentHeight, scale, imageGap) {
   const items = images
@@ -35,7 +45,7 @@ function groupImagesIntoPages(images, contentHeight, scale, imageGap) {
 /**
  * Combines PNG files from the trimmed folder into a single optimized PDF document
  */
-async function combinePDFs() {
+async function combinePDFs(instrument) {
   const trimmedDir = "trimmed";
 
   // Check if directory exists
@@ -47,7 +57,7 @@ async function combinePDFs() {
   // Get all PNG files from the trimmed directory
   const imageFiles = fs
     .readdirSync(trimmedDir)
-    .filter((file) => file.toLowerCase().endsWith(".png"))
+    .filter((file) => file.includes(instrument.file))
     .map((file) => path.join(trimmedDir, file));
 
   if (imageFiles.length === 0) {
@@ -82,7 +92,7 @@ async function combinePDFs() {
   }
 
   // Create a new PDF writer
-  const outputPath = "combined.pdf";
+  const outputPath = `${instrument.file}.pdf`;
 
   // Make sure output directory exists
   const outputDir = path.dirname(outputPath);
@@ -95,6 +105,8 @@ async function combinePDFs() {
 
   // Track the current page number in the combined PDF
   let pageIndex = 0;
+  // Image page number (excludes index pages)
+  let imagePageNumber = 0;
 
   // Collect index entries while placing images
   const indexEntries = [];
@@ -125,9 +137,9 @@ async function combinePDFs() {
   // Define margins in points (72 points = 1 inch)
   const margin = {
     top: 36,
-    bottom: 36,
-    left: 36,
-    right: 36,
+    bottom: 30,
+    left: 40,
+    right: 40,
   };
 
   // A4 page size in points
@@ -137,7 +149,6 @@ async function combinePDFs() {
   // Content area
   const contentWidth = pageWidth - margin.left - margin.right;
   const contentHeight = pageHeight - margin.top - margin.bottom;
-  // const pageLimitY = pageHeight - margin.top; // ...existing code...
 
   // Helper to draw right-justified page number at the bottom
   function drawPageNumber(ctx, number) {
@@ -166,62 +177,27 @@ async function combinePDFs() {
     imageGap
   );
 
-  // Start first page
-  let page = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
-  let contentContext = pdfWriter.startPageContentContext(page);
-  // Start from top margin for top-justified layout
-  let currentY = pageHeight - margin.top;
+  // Build and render the Index first (so it's the first page[s])
+  if (font && validImages.length > 0) {
+    // Calculate how many index pages we need
+    const lineHeight = 24;
+    const titleGap = 30;
 
-  // Render page-by-page based on grouping
-  for (let p = 0; p < pages.length; p++) {
-    if (p > 0) {
-      // finalize previous page and start a new one
-      if (font) drawPageNumber(contentContext, pageIndex + 1);
-      pdfWriter.writePage(page);
-      pageIndex++;
-      page = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
-      contentContext = pdfWriter.startPageContentContext(page);
-      currentY = pageHeight - margin.top;
-    }
+    // Precompute indexEntries with image-page numbers starting at 1
+    indexEntries.push(
+      ...pages.flatMap((items, pIdx) =>
+        items.map((img) => ({
+          title: img.filename
+            .replace(/\.png$/i, "")
+            .replace(
+              new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"),
+              ""
+            ),
+          page: pIdx + 1, // no offset from index pages
+        }))
+      )
+    );
 
-    for (const img of pages[p]) {
-      const wPts = img.width * scale;
-      const hPts = img.height * scale;
-
-      // Safety: if something doesn't fit due to rounding, spill to a new page
-      if (currentY - hPts < margin.bottom) {
-        if (font) drawPageNumber(contentContext, pageIndex + 1);
-        pdfWriter.writePage(page);
-        pageIndex++;
-        page = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
-        contentContext = pdfWriter.startPageContentContext(page);
-        currentY = pageHeight - margin.top;
-      }
-
-      const x = margin.left + (contentWidth - wPts) / 2; // center horizontally
-      const y = currentY - hPts; // place so image top sits at currentY
-
-      contentContext.drawImage(x, y, img.path, {
-        transformation: { width: wPts, height: hPts },
-      });
-
-      // Track index entry: filename without .png and strip trailing "-Flute-<num>"
-      indexEntries.push({
-        title: img.filename.replace(/\.png$/i, "").replace(/-Flute-\d+$/i, ""),
-        page: pageIndex + 1,
-      });
-
-      currentY -= hPts + imageGap;
-    }
-  }
-
-  // Finalize the last image page
-  if (font) drawPageNumber(contentContext, pageIndex + 1);
-  pdfWriter.writePage(page);
-  pageIndex++;
-
-  // Append index pages (if font available)
-  if (font && indexEntries.length > 0) {
     // Sort by title
     const sorted = indexEntries.slice().sort((a, b) =>
       a.title.localeCompare(b.title, undefined, {
@@ -230,22 +206,28 @@ async function combinePDFs() {
       })
     );
 
+    // Render index pages now
     let idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
     let idxCtx = pdfWriter.startPageContentContext(idxPage);
     let y = pageHeight - margin.top;
 
-    const titleSize = 16;
     const lineSize = 12;
-    const lineHeight = 14;
 
-    // Title
-    idxCtx.writeText("Index", margin.left, y, { font, size: titleSize });
-    y -= 24;
+    // Title on first index page
+    idxCtx.writeText(
+      `Frome Balfolk Tunes  - (${instrument.title})`,
+      margin.left,
+      y,
+      {
+        font,
+        size: 30,
+      }
+    );
+    y -= titleGap;
 
-    // New: layout constants for half-width column + dot leaders
     const columnWidth = contentWidth / 2;
     const columnRight = margin.left + columnWidth;
-    const gap = 6; // tighter spacing
+    const gap = 6;
     const dotChar = ".";
     let dotWidth = 0;
     try {
@@ -254,19 +236,14 @@ async function combinePDFs() {
 
     for (const item of sorted) {
       if (y < margin.bottom + lineHeight) {
-        // close current index page
-        drawPageNumber(idxCtx, pageIndex + 1);
+        // close current index page (no page number on index pages)
         pdfWriter.writePage(idxPage);
         pageIndex++;
 
-        // start a new index page
+        // start a new index page (no title on subsequent pages)
         idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
         idxCtx = pdfWriter.startPageContentContext(idxPage);
         y = pageHeight - margin.top;
-
-        // Re-draw title on new index page to keep consistency (optional)
-        // idxCtx.writeText("Index", margin.left, y, { font, size: titleSize });
-        // y -= 24;
       }
 
       const pageText = String(item.page);
@@ -274,10 +251,8 @@ async function combinePDFs() {
       try {
         numWidth = font.calculateTextDimensions(pageText, lineSize).width || 0;
       } catch (_) {}
-
       const numX = columnRight - numWidth;
 
-      // Max title width leaves space for at least one dot and the number
       let maxTitleWidth = numX - margin.left - gap - (dotWidth || 3);
 
       let titleText = item.title;
@@ -301,20 +276,18 @@ async function combinePDFs() {
           tWidth = font.calculateTextDimensions(titleText, lineSize).width || 0;
         }
 
-        // Compute dot leader to fill remaining space, with safety padding
+        // Compute dot leader
         const titleWidth = tWidth;
         const dotStartX = margin.left + titleWidth + gap;
-        const safetyPad = 2; // small cushion so dots never touch/overrun the number
+        const safetyPad = 2;
         const maxDotsWidth = Math.max(0, numX - gap - dotStartX - safetyPad);
 
         let dots = "";
         if (maxDotsWidth > 0) {
           if (dotWidth > 0) {
-            // Initial estimate
             let count = Math.floor(maxDotsWidth / dotWidth);
             if (count > 0) {
               dots = dotChar.repeat(count);
-              // Measure and trim until it fits
               try {
                 let dotsWidth =
                   font.calculateTextDimensions(dots, lineSize).width || 0;
@@ -324,13 +297,11 @@ async function combinePDFs() {
                     font.calculateTextDimensions(dots, lineSize).width || 0;
                 }
               } catch (_) {
-                // If measurement fails, keep estimate but ensure at least 1 dot fits
                 while (dots.length > 0 && dots.length * dotWidth > maxDotsWidth)
                   dots = dots.slice(0, -1);
               }
             }
           } else {
-            // Fallback if width calc fails
             const approxDotWidth = 3;
             let count = Math.floor(maxDotsWidth / approxDotWidth);
             if (count > 0) dots = dotChar.repeat(count);
@@ -351,17 +322,74 @@ async function combinePDFs() {
       y -= lineHeight;
     }
 
-    // finalize last index page
-    drawPageNumber(idxCtx, pageIndex + 1);
+    // finalize last index page (no page number on index pages)
     pdfWriter.writePage(idxPage);
     pageIndex++;
   }
 
+  // Start first image page (after index pages)
+  let page = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
+  let contentContext = pdfWriter.startPageContentContext(page);
+  let currentY = pageHeight - margin.top;
+
+  // Render page-by-page based on grouping
+  for (let p = 0; p < pages.length; p++) {
+    if (p > 0) {
+      // finalize previous image page and start a new one
+      if (font) drawPageNumber(contentContext, imagePageNumber + 1);
+      pdfWriter.writePage(page);
+      imagePageNumber++;
+      pageIndex++;
+
+      page = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
+      contentContext = pdfWriter.startPageContentContext(page);
+      currentY = pageHeight - margin.top;
+    }
+
+    for (const img of pages[p]) {
+      const wPts = img.width * scale;
+      const hPts = img.height * scale;
+
+      // Safety: if something doesn't fit due to rounding, spill to a new page
+      if (currentY - hPts < margin.bottom) {
+        if (font) drawPageNumber(contentContext, imagePageNumber + 1);
+        pdfWriter.writePage(page);
+        imagePageNumber++;
+        pageIndex++;
+
+        page = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
+        contentContext = pdfWriter.startPageContentContext(page);
+        currentY = pageHeight - margin.top;
+      }
+
+      const x = margin.left + (contentWidth - wPts) / 2;
+      const y = currentY - hPts;
+
+      contentContext.drawImage(x, y, img.path, {
+        transformation: { width: wPts, height: hPts },
+      });
+
+      currentY -= hPts + imageGap;
+    }
+  }
+
+  // Finalize the last image page
+  if (font) drawPageNumber(contentContext, imagePageNumber + 1);
+  pdfWriter.writePage(page);
+  imagePageNumber++;
+  pageIndex++;
+
   // Finalize the PDF
   pdfWriter.end();
 
-  console.log(`Total pages: ${pageIndex}`);
+  console.log(
+    `${instrument.file}\n   Total pages ${pageIndex}\n   Total Tunes: ${imageFiles.length}`
+  );
 }
 
 // Execute the function
-combinePDFs().catch((error) => console.error("Error combining images:", error));
+for (const instrument of instruments) {
+  combinePDFs(instrument).catch((error) =>
+    console.error(`Error combining images for ${instrument.file}:`, error)
+  );
+}

@@ -1,1 +1,2 @@
-Hello 123
+batch_trim.sh
+node src/combine.js

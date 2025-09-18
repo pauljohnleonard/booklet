@@ -8,6 +8,7 @@ folder="/Users/paulleonard/Library/CloudStorage/GoogleDrive-pauljohnleonard@gmai
 
 # Create the main trimmed directory
 mkdir -p trimmed
+rm -rf trimmed/*
 
 # Find all subdirectories in the main folder
 for subdir in "${folder}"*/; do
@@ -16,9 +17,9 @@ for subdir in "${folder}"*/; do
   
 
   
-  # Get all Flute PNG files in this subdirectory
-  for filename in "${subdir}"*Flute*.png; do
-    # Check if files exist
+  # Get only Flute-1 and Clarinet_in_Bb PNG files in this subdirectory
+  for filename in "${subdir}"*Flute-1.png "${subdir}"*Clarinet_in_Bb-1.png; do
+    # Check if files exist (skip if glob didn't match)
     [ -e "$filename" ] || continue
     
     echo "Trimming ${filename} to PNG format..."
@@ -28,3 +29,4 @@ for subdir in "${folder}"*/; do
     magick "${filename}" -trim "trimmed/${base_filename}.png"
   done
 done
+
