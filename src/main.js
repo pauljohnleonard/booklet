@@ -228,8 +228,6 @@ async function combinePDFs(instrument) {
     return;
   }
 
-
-  
   // Create a new PDF writer
   const outputPath = `booklets/${instrument.file}.pdf`;
 
@@ -301,6 +299,21 @@ async function combinePDFs(instrument) {
     const x = pageWidth - margin.right - textWidth; // right-justify at right margin
     const y = Math.max(12, margin.bottom / 2);
     ctx.writeText(text, x, y, { font, size });
+  }
+
+  // Helper to draw date in the bottom left corner
+  function drawDate(ctx) {
+    if (!font) return;
+    const now = new Date();
+    const dateText = now.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    const size = 10;
+    const x = margin.left;
+    const y = Math.max(12, margin.bottom / 2);
+    ctx.writeText(dateText, x, y, { font, size });
   }
 
   // Compute a single global scale so the widest image fits horizontally
@@ -376,6 +389,8 @@ async function combinePDFs(instrument) {
     for (const item of sorted) {
       if (y < margin.bottom + lineHeight) {
         // close current index page (no page number on index pages)
+        // Add date to all pages
+        drawDate(idxCtx);
         pdfWriter.writePage(idxPage);
         pageIndex++;
 
@@ -462,6 +477,8 @@ async function combinePDFs(instrument) {
     }
 
     // finalize last index page (no page number on index pages)
+    // Add date to all pages
+    drawDate(idxCtx);
     pdfWriter.writePage(idxPage);
     pageIndex++;
   }
@@ -475,7 +492,10 @@ async function combinePDFs(instrument) {
   for (let p = 0; p < pages.length; p++) {
     if (p > 0) {
       // finalize previous image page and start a new one
-      if (font) drawPageNumber(contentContext, imagePageNumber + 1);
+      if (font) {
+        drawPageNumber(contentContext, imagePageNumber + 1);
+        drawDate(contentContext);
+      }
       pdfWriter.writePage(page);
       imagePageNumber++;
       pageIndex++;
@@ -491,7 +511,10 @@ async function combinePDFs(instrument) {
 
       // Safety: if something doesn't fit due to rounding, spill to a new page
       if (currentY - hPts < margin.bottom) {
-        if (font) drawPageNumber(contentContext, imagePageNumber + 1);
+        if (font) {
+          drawPageNumber(contentContext, imagePageNumber + 1);
+          drawDate(contentContext);
+        }
         pdfWriter.writePage(page);
         imagePageNumber++;
         pageIndex++;
@@ -513,7 +536,10 @@ async function combinePDFs(instrument) {
   }
 
   // Finalize the last image page
-  if (font) drawPageNumber(contentContext, imagePageNumber + 1);
+  if (font) {
+    drawPageNumber(contentContext, imagePageNumber + 1);
+    drawDate(contentContext);
+  }
   pdfWriter.writePage(page);
   imagePageNumber++;
   pageIndex++;
