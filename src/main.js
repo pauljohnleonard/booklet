@@ -2,6 +2,7 @@ import muhammara from "muhammara";
 import fs from "fs";
 import path from "path";
 import imageSize from "image-size"; // npm install image-size
+import { PDFDocument } from "pdf-lib"; // npm install pdf-lib
 
 // Ensure output folder exists early
 if (!fs.existsSync("booklets")) {
@@ -228,6 +229,51 @@ async function combinePDFs(instrument) {
     return;
   }
 
+  // Check for baseline files to determine if we need to create appendix
+  const baselineFile = `baseline_${instrument.file
+    .toLowerCase()
+    .replace("_in_bb", "")}.txt`;
+  let originalImages = validImages;
+  let appendixImages = [];
+  let hasAppendix = false;
+
+  if (fs.existsSync(baselineFile)) {
+    console.log(`Found baseline file: ${baselineFile}`);
+
+    // Read baseline file to get original image list
+    const baselineContent = fs.readFileSync(baselineFile, "utf8");
+    const baselineImagePaths = baselineContent
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => line.trim());
+
+    // Create a set of baseline filenames for quick lookup
+    const baselineFilenames = new Set(
+      baselineImagePaths.map((filepath) => path.basename(filepath))
+    );
+
+    // Separate original and new images
+    originalImages = validImages.filter((img) =>
+      baselineFilenames.has(img.filename)
+    );
+
+    appendixImages = validImages.filter(
+      (img) => !baselineFilenames.has(img.filename)
+    );
+
+    hasAppendix = appendixImages.length > 0;
+
+    console.log(`Original images: ${originalImages.length}`);
+    console.log(`New images for appendix: ${appendixImages.length}`);
+
+    if (hasAppendix) {
+      console.log("New images found:");
+      appendixImages.forEach((img) => console.log(`  - ${img.filename}`));
+    }
+  } else {
+    console.log("No baseline file found - generating complete booklet");
+  }
+
   // Create a new PDF writer
   const outputPath = `booklets/${instrument.file}.pdf`;
 
@@ -322,12 +368,32 @@ async function combinePDFs(instrument) {
   const scale = contentWidth / maxWidthPx; // To avoid upscaling, use: Math.min(1, contentWidth / maxWidthPx)
 
   // Group images into minimal page sets (order by best fit, not filename)
-  const pages = groupImagesIntoPages(
-    validImages,
+  // Handle original and appendix images separately
+  const originalPages = groupImagesIntoPages(
+    originalImages,
     contentHeight,
     scale,
     imageGap
   );
+
+  let appendixPages = [];
+  if (hasAppendix) {
+    appendixPages = groupImagesIntoPages(
+      appendixImages,
+      contentHeight,
+      scale,
+      imageGap
+    );
+  }
+
+  // Combine all pages for processing
+  const allPages = [...originalPages, ...appendixPages];
+
+  // Array to store page objects for linking
+  const imagePageObjects = [];
+
+  // Array to store index pages for adding links later
+  const indexPages = [];
 
   // Build and render the Index first (so it's the first page[s])
   if (font && validImages.length > 0) {
@@ -335,9 +401,9 @@ async function combinePDFs(instrument) {
     const lineHeight = 24;
     const titleGap = 30;
 
-    // Precompute indexEntries with image-page numbers starting at 1
+    // Create index entries for original images
     indexEntries.push(
-      ...pages.flatMap((items, pIdx) =>
+      ...originalPages.flatMap((items, pIdx) =>
         items.map((img) => ({
           title: img.filename
             .replace(/\.png$/i, "")
@@ -346,9 +412,31 @@ async function combinePDFs(instrument) {
               ""
             ),
           page: pIdx + 1, // no offset from index pages
+          pageIndex: pIdx, // store the actual page index for linking
+          section: "original",
         }))
       )
     );
+
+    // Add appendix entries if they exist
+    if (hasAppendix) {
+      // Add appendix entries (no separator in index - header on page is sufficient)
+      indexEntries.push(
+        ...appendixPages.flatMap((items, pIdx) =>
+          items.map((img) => ({
+            title: img.filename
+              .replace(/\.png$/i, "")
+              .replace(
+                new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"),
+                ""
+              ),
+            page: originalPages.length + pIdx + 1,
+            pageIndex: originalPages.length + pIdx,
+            section: "appendix",
+          }))
+        )
+      );
+    }
 
     // Sort by title
     const sorted = indexEntries.slice().sort((a, b) =>
@@ -362,6 +450,9 @@ async function combinePDFs(instrument) {
     let idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
     let idxCtx = pdfWriter.startPageContentContext(idxPage);
     let y = pageHeight - margin.top;
+
+    // Store all index pages to add links later
+    indexPages.push(idxPage);
 
     const lineSize = 12;
 
@@ -397,6 +488,7 @@ async function combinePDFs(instrument) {
         // start a new index page (no title on subsequent pages)
         idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
         idxCtx = pdfWriter.startPageContentContext(idxPage);
+        indexPages.push(idxPage); // Store for link creation later
         y = pageHeight - margin.top;
       }
 
@@ -462,11 +554,38 @@ async function combinePDFs(instrument) {
           }
         }
 
-        // Draw: title (left), dots (middle), page number (right edge of half column)
-        idxCtx.writeText(titleText, margin.left, y, { font, size: lineSize });
-        if (dots)
-          idxCtx.writeText(dots, dotStartX, y, { font, size: lineSize });
-        idxCtx.writeText(pageText, numX, y, { font, size: lineSize });
+        // Handle separators differently - draw without dots or page numbers
+        if (item.isSeparator) {
+          // Draw separator with centered text and no clickable link
+          idxCtx.writeText(titleText, margin.left, y, {
+            font,
+            size: lineSize + 2,
+          });
+        } else {
+          // Draw: title (left), dots (middle), page number (right edge of half column)
+          idxCtx.writeText(titleText, margin.left, y, { font, size: lineSize });
+          if (dots)
+            idxCtx.writeText(dots, dotStartX, y, { font, size: lineSize });
+          idxCtx.writeText(pageText, numX, y, { font, size: lineSize });
+
+          // Add clickable link area covering the entire line
+          // We'll need to update this link later once we have the page objects
+          const linkHeight = lineHeight;
+          const linkY = y - 2; // slight adjustment for better click area
+          const linkWidth = columnRight - margin.left;
+
+          // Store link info for later (after we create the image pages)
+          if (!idxPage._linkAnnotations) {
+            idxPage._linkAnnotations = [];
+          }
+          idxPage._linkAnnotations.push({
+            x: margin.left,
+            y: linkY,
+            width: linkWidth,
+            height: linkHeight,
+            targetPageIndex: item.pageIndex,
+          });
+        }
       } catch (_) {
         // Fallback: just draw minimally if anything fails
         idxCtx.writeText(titleText, margin.left, y, { font, size: lineSize });
@@ -479,6 +598,9 @@ async function combinePDFs(instrument) {
     // finalize last index page (no page number on index pages)
     // Add date to all pages
     drawDate(idxCtx);
+
+    // Before writing index pages, we need to create placeholder for links
+    // We'll come back and add them after image pages are created
     pdfWriter.writePage(idxPage);
     pageIndex++;
   }
@@ -488,8 +610,14 @@ async function combinePDFs(instrument) {
   let contentContext = pdfWriter.startPageContentContext(page);
   let currentY = pageHeight - margin.top;
 
+  // Store the first image page
+  imagePageObjects.push(page);
+
   // Render page-by-page based on grouping
-  for (let p = 0; p < pages.length; p++) {
+  for (let p = 0; p < allPages.length; p++) {
+    // Check if we're starting the appendix section
+    const isAppendixStart = hasAppendix && p === originalPages.length;
+
     if (p > 0) {
       // finalize previous image page and start a new one
       if (font) {
@@ -503,9 +631,23 @@ async function combinePDFs(instrument) {
       page = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
       contentContext = pdfWriter.startPageContentContext(page);
       currentY = pageHeight - margin.top;
+
+      // Store this image page
+      imagePageObjects.push(page);
     }
 
-    for (const img of pages[p]) {
+    // If starting appendix, add some visual separation
+    if (isAppendixStart && font) {
+      // Add "New Tunes" header at top of first appendix page
+      const headerY = pageHeight - margin.top;
+      contentContext.writeText("New Tunes", margin.left, headerY, {
+        font,
+        size: 20,
+      });
+      currentY = headerY - 40; // Space after header
+    }
+
+    for (const img of allPages[p]) {
       const wPts = img.width * scale;
       const hPts = img.height * scale;
 
@@ -522,6 +664,9 @@ async function combinePDFs(instrument) {
         page = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
         contentContext = pdfWriter.startPageContentContext(page);
         currentY = pageHeight - margin.top;
+
+        // Store this overflow page
+        imagePageObjects.push(page);
       }
 
       const x = margin.left + (contentWidth - wPts) / 2;
@@ -543,6 +688,80 @@ async function combinePDFs(instrument) {
   pdfWriter.writePage(page);
   imagePageNumber++;
   pageIndex++;
+
+  // Now add the clickable links to index pages using pdf-lib
+  // Use a post-processing approach
+  if (font && indexPages.length > 0 && imagePageObjects.length > 0) {
+    try {
+      // Close current writer
+      pdfWriter.end();
+
+      // Load the PDF with pdf-lib
+      const pdfBytes = fs.readFileSync(outputPath);
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      const pages = pdfDoc.getPages();
+
+      // Add links to index pages
+      let indexPageNum = 0;
+      for (const idxPage of indexPages) {
+        if (idxPage._linkAnnotations && idxPage._linkAnnotations.length > 0) {
+          const page = pages[indexPageNum];
+
+          for (const linkInfo of idxPage._linkAnnotations) {
+            // Calculate target page number (index pages + target image page index)
+            const targetPageNum = indexPages.length + linkInfo.targetPageIndex;
+
+            if (targetPageNum < pages.length) {
+              const targetPage = pages[targetPageNum];
+
+              // Create link annotation using pdf-lib's low-level API
+              const linkAnnotation = pdfDoc.context.obj({
+                Type: "Annot",
+                Subtype: "Link",
+                Rect: [
+                  linkInfo.x,
+                  linkInfo.y,
+                  linkInfo.x + linkInfo.width,
+                  linkInfo.y + linkInfo.height,
+                ],
+                Border: [0, 0, 0],
+                C: [0, 0, 1], // Optional: blue color for link (invisible)
+                A: {
+                  Type: "Action",
+                  S: "GoTo",
+                  D: [targetPage.ref, "XYZ", null, null, null],
+                },
+              });
+
+              const linkAnnotationRef = pdfDoc.context.register(linkAnnotation);
+
+              // Add annotation to the page
+              const annots = page.node.Annots();
+              if (annots) {
+                annots.push(linkAnnotationRef);
+              } else {
+                page.node.set(
+                  pdfDoc.context.obj("Annots"),
+                  pdfDoc.context.obj([linkAnnotationRef])
+                );
+              }
+            }
+          }
+        }
+        indexPageNum++;
+      }
+
+      // Save the modified PDF
+      const modifiedPdfBytes = await pdfDoc.save();
+      fs.writeFileSync(outputPath, modifiedPdfBytes);
+
+      console.log(`✓ Added clickable links to table of contents`);
+    } catch (error) {
+      console.warn("Note: Could not create clickable links:", error.message);
+    }
+
+    return; // Exit early since we already called end()
+  }
 
   // Finalize the PDF
   pdfWriter.end();

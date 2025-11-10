@@ -8,7 +8,6 @@ folder="/Users/paulleonard/Library/CloudStorage/GoogleDrive-pauljohnleonard@gmai
 
 # Create the main trimmed directory
 mkdir -p trimmed
-rm -rf trimmed/*
 
 # Find all subdirectories in the main folder
 for subdir in "${folder}"*/; do
@@ -22,11 +21,18 @@ for subdir in "${folder}"*/; do
     # Check if files exist (skip if glob didn't match)
     [ -e "$filename" ] || continue
     
-    echo "Trimming ${filename} to PNG format..."
     # Extract the base filename without extension
     base_filename=$(basename "$filename" .png)
-
-    magick "${filename}" -trim "trimmed/${base_filename}.png"
+    output_file="trimmed/${base_filename}.png"
+    
+    # Skip if output file already exists
+    if [ -e "$output_file" ]; then
+      echo "Skipping ${filename} (already processed)"
+      continue
+    fi
+    
+    echo "Trimming ${filename} to PNG format..."
+    magick "${filename}" -trim "$output_file"
   done
 done
 
