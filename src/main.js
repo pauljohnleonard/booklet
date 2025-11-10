@@ -676,7 +676,96 @@ async function combinePDFs(instrument) {
         transformation: { width: wPts, height: hPts },
       });
 
-      currentY -= hPts + imageGap;
+      let linkSpacing = 0;
+
+      // Check for corresponding link file
+      if (font) {
+        const tuneBaseName = img.filename
+          .replace(/\.png$/i, "")
+          .replace(
+            new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"),
+            ""
+          );
+
+        const linkFilePath = path.join("trimmed", `${tuneBaseName}_link`);
+
+        if (fs.existsSync(linkFilePath)) {
+          try {
+            let linkContent = fs.readFileSync(linkFilePath, "utf8").trim();
+            if (linkContent) {
+              // Ensure URL has proper protocol
+              if (
+                !linkContent.startsWith("http://") &&
+                !linkContent.startsWith("https://")
+              ) {
+                linkContent = "https://" + linkContent;
+              }
+
+              console.log(`Adding link for ${tuneBaseName}: ${linkContent}`);
+
+              // Create user-friendly display text
+              let displayText = linkContent;
+              if (
+                linkContent.includes("youtube.com") ||
+                linkContent.includes("youtu.be")
+              ) {
+                displayText = "▶ Watch on YouTube";
+              } else if (linkContent.includes("spotify.com")) {
+                displayText = "♪ Listen on Spotify";
+              } else if (linkContent.length > 30) {
+                // Truncate very long URLs
+                displayText = linkContent.substring(0, 30) + "...";
+              }
+
+              // Position link text below the image
+              const linkY = y - 15; // 15 points below image
+              const linkSize = 10;
+              const linkColor = [0, 0, 1]; // Blue color for links
+
+              // Calculate text width to center it
+              let linkWidth = 0;
+              try {
+                linkWidth =
+                  font.calculateTextDimensions(displayText, linkSize).width ||
+                  0;
+              } catch (_) {}
+
+              const linkX = margin.left + (contentWidth - linkWidth) / 2;
+
+              // Draw the link text
+              contentContext.writeText(displayText, linkX, linkY, {
+                font,
+                size: linkSize,
+                colorspace: "rgb",
+                color: linkColor,
+              });
+
+              // Store link annotation for later processing (similar to index links)
+              if (!page._linkAnnotations) {
+                page._linkAnnotations = [];
+              }
+
+              page._linkAnnotations.push({
+                x: linkX,
+                y: linkY - 3,
+                width: linkWidth,
+                height: linkSize + 6,
+                url: linkContent,
+                isExternalLink: true,
+              });
+
+              linkSpacing = 20; // Extra spacing below link
+            }
+          } catch (error) {
+            console.warn(
+              `Could not read link file: ${linkFilePath}`,
+              error.message
+            );
+          }
+        }
+      }
+
+      currentY -= hPts + imageGap + linkSpacing;
     }
   }
 
@@ -749,6 +838,62 @@ async function combinePDFs(instrument) {
           }
         }
         indexPageNum++;
+      }
+
+      // Process external links on image pages
+      for (let pageNum = 0; pageNum < imagePageObjects.length; pageNum++) {
+        const imagePage = imagePageObjects[pageNum];
+        if (
+          imagePage._linkAnnotations &&
+          imagePage._linkAnnotations.length > 0
+        ) {
+          const pdfLibPage = pages[indexPages.length + pageNum]; // Offset by index pages
+
+          for (const linkInfo of imagePage._linkAnnotations) {
+            if (linkInfo.isExternalLink) {
+              try {
+                // Use pdf-lib's high-level API for URL links
+                const { PDFName, PDFString } = await import("pdf-lib");
+
+                // Create external URL link annotation with proper URI encoding
+                const urlLinkAnnotation = pdfDoc.context.obj({
+                  Type: "Annot",
+                  Subtype: "Link",
+                  Rect: [
+                    linkInfo.x,
+                    linkInfo.y,
+                    linkInfo.x + linkInfo.width,
+                    linkInfo.y + linkInfo.height,
+                  ],
+                  Border: [0, 0, 0],
+                  H: "I", // Highlight mode: Invert
+                  A: {
+                    Type: "Action",
+                    S: "URI",
+                    URI: pdfDoc.context.obj(linkInfo.url), // Properly encode as PDF string
+                  },
+                });
+
+                const urlLinkRef = pdfDoc.context.register(urlLinkAnnotation);
+
+                // Add annotation to the page
+                const annots = pdfLibPage.node.Annots();
+                if (annots) {
+                  annots.push(urlLinkRef);
+                } else {
+                  pdfLibPage.node.set(
+                    pdfDoc.context.obj("Annots"),
+                    pdfDoc.context.obj([urlLinkRef])
+                  );
+                }
+
+                console.log(`✓ Added clickable link: ${linkInfo.url}`);
+              } catch (error) {
+                console.warn(`Failed to add link: ${error.message}`);
+              }
+            }
+          }
+        }
       }
 
       // Save the modified PDF

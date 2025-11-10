@@ -1,11 +1,25 @@
 #!/bin/bash
 
-# Function to ask yes/no questions
+# Function to ask yes/no questions (defaults to Yes)
 ask_yes_no() {
     while true; do
         read -p "$1 (Y/n): " yn
         # Default to yes if empty (just pressed Enter)
         yn=${yn:-y}
+        case $yn in
+            [Yy]* ) return 0;;
+            [Nn]* ) return 1;;
+            * ) echo "Please answer y or n.";;
+        esac
+    done
+}
+
+# Function to ask yes/no questions (defaults to No)
+ask_yes_no_default_no() {
+    while true; do
+        read -p "$1 (y/N): " yn
+        # Default to no if empty (just pressed Enter)
+        yn=${yn:-n}
         case $yn in
             [Yy]* ) return 0;;
             [Nn]* ) return 1;;
@@ -31,7 +45,7 @@ echo
 
 # Baseline management options
 if $baseline_exists; then
-    if ask_yes_no "Reset to full generation mode (delete baseline files)?"; then
+    if ask_yes_no_default_no "Reset to full generation mode (delete baseline files)?"; then
         rm -f baseline_*.txt
         echo "✓ Baseline files deleted - switching to full generation mode"
         baseline_exists=false

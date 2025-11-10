@@ -16,6 +16,18 @@ for subdir in "${folder}"*/; do
   
 
   
+  # Check for 'link' file and copy if found
+  link_file="${subdir}link"
+  if [ -e "$link_file" ]; then
+    link_output="trimmed/${subdir_name}_link"
+    if [ -e "$link_output" ]; then
+      echo "Skipping ${link_file} (already processed)"
+    else
+      echo "Copying ${link_file} to ${link_output}..."
+      cp "$link_file" "$link_output"
+    fi
+  fi
+  
   # Get only Flute-1 and Clarinet_in_Bb PNG files in this subdirectory
   for filename in "${subdir}"*Flute-1.png "${subdir}"*Clarinet_in_Bb-1.png; do
     # Check if files exist (skip if glob didn't match)
