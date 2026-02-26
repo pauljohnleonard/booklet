@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import imageSize from "image-size"; // npm install image-size
 import { PDFDocument } from "pdf-lib"; // npm install pdf-lib
+import QRCode from "qrcode"; // npm install qrcode
 
 // Ensure output folder exists early
 if (!fs.existsSync("booklets")) {
@@ -24,11 +25,11 @@ function escapeRegExp(str) {
 // - Exact per-page 0/1 knapsack (pseudo-polynomial) to tightly fill each page
 // Returns the better result (fewest pages; tie-break by least slack).
 function groupImagesIntoPages(images, contentHeight, scale, imageGap) {
-  // Prepare items with scaled height
+  // Prepare items with scaled height + link spacing
   const items = images.map((img, idx) => ({
     ...img,
     _idx: idx,
-    scaledHeight: img.height * scale,
+    scaledHeight: img.height * scale + (img.linkSpacing || 0),
   }));
 
   // Helper: convert packed pages (arrays of items with helpers) to original shape
@@ -274,6 +275,9 @@ async function combinePDFs(instrument) {
     console.log("No baseline file found - generating complete booklet");
   }
 
+  // QR code generation disabled for now
+  const qrCodes = new Map(); // Keep map for compatibility but don't generate QR codes
+
   // Create a new PDF writer
   const outputPath = `booklets/${instrument.file}.pdf`;
 
@@ -366,6 +370,42 @@ async function combinePDFs(instrument) {
   const imageGap = 40;
   const maxWidthPx = Math.max(...validImages.map((i) => i.width));
   const scale = contentWidth / maxWidthPx; // To avoid upscaling, use: Math.min(1, contentWidth / maxWidthPx)
+
+  // Pre-calculate link spacing for each image to ensure accurate page layout
+  const linkSpacingMap = new Map();
+  for (const img of validImages) {
+    const tuneBaseName = img.filename
+      .replace(/\.png$/i, "")
+      .replace(new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"), "");
+
+    const linkFilePath = path.join("trimmed", `${tuneBaseName}_link`);
+
+    if (fs.existsSync(linkFilePath)) {
+      try {
+        const linkContent = fs.readFileSync(linkFilePath, "utf8").trim();
+        if (linkContent) {
+          const links = linkContent
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+
+          const lineHeight = 15; // Must match the lineHeight in the drawing section
+          const spacing = 10 + links.length * lineHeight;
+          linkSpacingMap.set(img.filename, spacing);
+        }
+      } catch (error) {
+        // Silently ignore link file errors during pre-calculation
+      }
+    }
+  }
+
+  // Add linkSpacing to each image's height for accurate page layout
+  originalImages.forEach((img) => {
+    img.linkSpacing = linkSpacingMap.get(img.filename) || 0;
+  });
+  appendixImages.forEach((img) => {
+    img.linkSpacing = linkSpacingMap.get(img.filename) || 0;
+  });
 
   // Group images into minimal page sets (order by best fit, not filename)
   // Handle original and appendix images separately
@@ -678,7 +718,7 @@ async function combinePDFs(instrument) {
 
       let linkSpacing = 0;
 
-      // Check for corresponding link file
+      // Check for link file (can have multiple links, one per line)
       if (font) {
         const tuneBaseName = img.filename
           .replace(/\.png$/i, "")
@@ -691,74 +731,70 @@ async function combinePDFs(instrument) {
 
         if (fs.existsSync(linkFilePath)) {
           try {
-            let linkContent = fs.readFileSync(linkFilePath, "utf8").trim();
+            const linkContent = fs.readFileSync(linkFilePath, "utf8").trim();
             if (linkContent) {
-              // Ensure URL has proper protocol
-              if (
-                !linkContent.startsWith("http://") &&
-                !linkContent.startsWith("https://")
-              ) {
-                linkContent = "https://" + linkContent;
-              }
+              // Split by newlines to handle multiple links
+              const links = linkContent
+                .split("\n")
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0);
 
-              console.log(`Adding link for ${tuneBaseName}: ${linkContent}`);
-
-              // Create user-friendly display text
-              let displayText = linkContent;
-              if (
-                linkContent.includes("youtube.com") ||
-                linkContent.includes("youtu.be")
-              ) {
-                displayText = "▶ Watch on YouTube";
-              } else if (linkContent.includes("spotify.com")) {
-                displayText = "♪ Listen on Spotify";
-              } else if (linkContent.length > 30) {
-                // Truncate very long URLs
-                displayText = linkContent.substring(0, 30) + "...";
-              }
-
-              // Position link text below the image
-              const linkY = y - 15; // 15 points below image
               const linkSize = 10;
               const linkColor = [0, 0, 1]; // Blue color for links
+              const lineHeight = 15; // Spacing between links
+              let linkY = y - 15; // Start 15 points below image
 
-              // Calculate text width to center it
-              let linkWidth = 0;
-              try {
-                linkWidth =
-                  font.calculateTextDimensions(displayText, linkSize).width ||
-                  0;
-              } catch (_) {}
-
-              const linkX = margin.left + (contentWidth - linkWidth) / 2;
-
-              // Draw the link text
-              contentContext.writeText(displayText, linkX, linkY, {
-                font,
-                size: linkSize,
-                colorspace: "rgb",
-                color: linkColor,
-              });
-
-              // Store link annotation for later processing (similar to index links)
               if (!page._linkAnnotations) {
                 page._linkAnnotations = [];
               }
 
-              page._linkAnnotations.push({
-                x: linkX,
-                y: linkY - 3,
-                width: linkWidth,
-                height: linkSize + 6,
-                url: linkContent,
-                isExternalLink: true,
-              });
+              for (let i = 0; i < links.length; i++) {
+                let url = links[i];
 
-              linkSpacing = 20; // Extra spacing below link
+                // Ensure URL has proper protocol
+                if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                  url = "https://" + url;
+                }
+
+                console.log(`Adding link for ${tuneBaseName}: ${url}`);
+
+                // Calculate text width
+                let linkWidth = 0;
+                try {
+                  linkWidth =
+                    font.calculateTextDimensions(url, linkSize).width || 0;
+                } catch (_) {}
+
+                // Center the link
+                const linkX = margin.left + (contentWidth - linkWidth) / 2;
+
+                // Draw the link text
+                contentContext.writeText(url, linkX, linkY, {
+                  font,
+                  size: linkSize,
+                  colorspace: "rgb",
+                  color: linkColor,
+                });
+
+                // Store link annotation for later processing
+                page._linkAnnotations.push({
+                  x: linkX,
+                  y: linkY - 3,
+                  width: linkWidth,
+                  height: linkSize + 6,
+                  url: url,
+                  isExternalLink: true,
+                });
+
+                // Move down for next link
+                linkY -= lineHeight;
+              }
+
+              linkSpacing = 10 + links.length * lineHeight; // Extra spacing below all links
             }
           } catch (error) {
             console.warn(
-              `Could not read link file: ${linkFilePath}`,
+              `Failed to read link file for ${tuneBaseName}:`,
               error.message
             );
           }
