@@ -1,0 +1,40 @@
+{
+  "dances": {
+    "An Dro / Hanter Dro": ["Hanter Dro de languidig", "The Wren"],
+    "Bourrée": [
+      "Bouree de Saint Chart",
+      "Last Chance Bourree",
+      "Two time bourrees",
+      "Crested Hens"
+    ],
+    "Branle": [],
+    "Chapelloise": ["The RSB"],
+    "Mazurka": ["Mazurka Grand Frise", "Motorway Mazurka", "Les deux freres"],
+    "Polka": [],
+    "Polska": ["Batiska"],
+    "Rond / Rondeau": ["Rondeau"],
+    "Scottische": [
+      "Nordlys Schottish",
+      "Scottische a Virmoux",
+      "Zelda - Jump at the Sun"
+    ],
+    "Waltz": ["Bouffard's Waltzes", "Flatbush Waltz"],
+
+    "Unclassified": [
+      "Scottish Urbaine - Sunshine",
+      "Boite de Jazz",
+      "Driving To Halsway",
+      "FlatWorld",
+      "Hellebore  Too Late to Sleep",
+      "La Gavre",
+      "Les deux freres",
+      "L'inconnu de Limoise",
+      "Ma Mignonne",
+      "Monster Cafe",
+      "Nina",
+      "Rose of Raby",
+      "Rue des Prés",
+      "Tarif de Nuit"
+    ]
+  }
+}

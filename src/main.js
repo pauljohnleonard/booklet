@@ -4,6 +4,7 @@ import path from "path";
 import imageSize from "image-size"; // npm install image-size
 import { PDFDocument } from "pdf-lib"; // npm install pdf-lib
 import QRCode from "qrcode"; // npm install qrcode
+import os from "os";
 
 // Ensure output folder exists early
 if (!fs.existsSync("booklets")) {
@@ -11,14 +12,21 @@ if (!fs.existsSync("booklets")) {
 }
 
 const instruments = [
-  { file: "Flute", title: "C" },
-  { file: "Clarinet_in_Bb", title: "Bb" },
+  { file: "C", title: "C" },
+  { file: "Bb", title: "Bb" },
+  { file: "B", title: "Bass" },
 ];
 
 // Escape instrument for safe use in RegExp
 function escapeRegExp(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// QR code configuration
+const QR_CODE_SIZE = 35; // PDF points (~12mm) — easily scannable on laser printers
+const QR_PIXELS = 200; // Pixel resolution of generated QR PNG
+const QR_CODE_GAP = 10; // Horizontal gap between side-by-side QR codes
+const QR_TOP_MARGIN = 5; // Vertical space above QR row
 
 // Group images into the fewest page-sets using a hybrid strategy:
 // - Best-Fit Decreasing (fast heuristic)
@@ -160,7 +168,7 @@ function groupImagesIntoPages(images, contentHeight, scale, imageGap) {
     const slack = pages.reduce((acc, page) => {
       const used = page.reduce(
         (u, it, idx) => u + it.scaledHeight + (idx > 0 ? imageGap : 0),
-        0
+        0,
       );
       return acc + Math.max(0, contentHeight - used);
     }, 0);
@@ -173,10 +181,10 @@ function groupImagesIntoPages(images, contentHeight, scale, imageGap) {
     sD.count < sB.count
       ? sD
       : sD.count > sB.count
-      ? sB
-      : sD.slack <= sB.slack
-      ? sD
-      : sB;
+        ? sB
+        : sD.slack <= sB.slack
+          ? sD
+          : sB;
 
   return stripHelpers(best.pages);
 }
@@ -194,9 +202,14 @@ async function combinePDFs(instrument) {
   }
 
   // Get all PNG files from the trimmed directory
+  // Use regex to match -C-N.png or -Bb-N.png pattern at end of filename
+  const instrumentPattern = new RegExp(
+    `-${escapeRegExp(instrument.file)}-\\d+\\.png$`,
+    "i",
+  );
   const imageFiles = fs
     .readdirSync(trimmedDir)
-    .filter((file) => file.includes(instrument.file))
+    .filter((file) => instrumentPattern.test(file))
     .map((file) => path.join(trimmedDir, file));
 
   if (imageFiles.length === 0) {
@@ -231,9 +244,7 @@ async function combinePDFs(instrument) {
   }
 
   // Check for baseline files to determine if we need to create appendix
-  const baselineFile = `baseline_${instrument.file
-    .toLowerCase()
-    .replace("_in_bb", "")}.txt`;
+  const baselineFile = `baseline_${instrument.file.toLowerCase()}.txt`;
   let originalImages = validImages;
   let appendixImages = [];
   let hasAppendix = false;
@@ -250,16 +261,16 @@ async function combinePDFs(instrument) {
 
     // Create a set of baseline filenames for quick lookup
     const baselineFilenames = new Set(
-      baselineImagePaths.map((filepath) => path.basename(filepath))
+      baselineImagePaths.map((filepath) => path.basename(filepath)),
     );
 
     // Separate original and new images
     originalImages = validImages.filter((img) =>
-      baselineFilenames.has(img.filename)
+      baselineFilenames.has(img.filename),
     );
 
     appendixImages = validImages.filter(
-      (img) => !baselineFilenames.has(img.filename)
+      (img) => !baselineFilenames.has(img.filename),
     );
 
     hasAppendix = appendixImages.length > 0;
@@ -275,8 +286,9 @@ async function combinePDFs(instrument) {
     console.log("No baseline file found - generating complete booklet");
   }
 
-  // QR code generation disabled for now
-  const qrCodes = new Map(); // Keep map for compatibility but don't generate QR codes
+  // Create temp directory for QR code PNGs
+  const qrTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "booklet-qr-"));
+  const qrCodeMap = new Map(); // tuneBaseName -> [{url, filepath, label}]
 
   // Create a new PDF writer
   const outputPath = `booklets/${instrument.file}.pdf`;
@@ -317,7 +329,7 @@ async function combinePDFs(instrument) {
   }
   if (!font) {
     console.warn(
-      "Warning: No TTF font found. Page numbers and index will be skipped."
+      "Warning: No TTF font found. Page numbers and index will be skipped.",
     );
   }
 
@@ -371,8 +383,9 @@ async function combinePDFs(instrument) {
   const maxWidthPx = Math.max(...validImages.map((i) => i.width));
   const scale = contentWidth / maxWidthPx; // To avoid upscaling, use: Math.min(1, contentWidth / maxWidthPx)
 
-  // Pre-calculate link spacing for each image to ensure accurate page layout
+  // Pre-generate QR codes and calculate link spacing for page layout
   const linkSpacingMap = new Map();
+  let qrCounter = 0;
   for (const img of validImages) {
     const tuneBaseName = img.filename
       .replace(/\.png$/i, "")
@@ -389,12 +402,34 @@ async function combinePDFs(instrument) {
             .map((line) => line.trim())
             .filter((line) => line.length > 0);
 
-          const lineHeight = 15; // Must match the lineHeight in the drawing section
-          const spacing = 10 + links.length * lineHeight;
+          // Generate QR codes (once per tune, not per page)
+          if (!qrCodeMap.has(tuneBaseName)) {
+            const qrInfos = [];
+            for (const rawUrl of links) {
+              const url =
+                rawUrl.startsWith("http://") || rawUrl.startsWith("https://")
+                  ? rawUrl
+                  : "https://" + rawUrl;
+              const filepath = path.join(qrTempDir, `qr_${qrCounter++}.png`);
+              await QRCode.toFile(filepath, url, {
+                width: QR_PIXELS,
+                margin: 1,
+                errorCorrectionLevel: "M",
+              });
+              qrInfos.push({ url, filepath });
+            }
+            qrCodeMap.set(tuneBaseName, qrInfos);
+          }
+
+          // QR row height: same regardless of number of links (side-by-side)
+          const spacing = QR_TOP_MARGIN + QR_CODE_SIZE;
           linkSpacingMap.set(img.filename, spacing);
         }
       } catch (error) {
-        // Silently ignore link file errors during pre-calculation
+        console.warn(
+          `Failed to generate QR for ${tuneBaseName}:`,
+          error.message,
+        );
       }
     }
   }
@@ -413,7 +448,7 @@ async function combinePDFs(instrument) {
     originalImages,
     contentHeight,
     scale,
-    imageGap
+    imageGap,
   );
 
   let appendixPages = [];
@@ -422,7 +457,7 @@ async function combinePDFs(instrument) {
       appendixImages,
       contentHeight,
       scale,
-      imageGap
+      imageGap,
     );
   }
 
@@ -449,13 +484,13 @@ async function combinePDFs(instrument) {
             .replace(/\.png$/i, "")
             .replace(
               new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"),
-              ""
+              "",
             ),
           page: pIdx + 1, // no offset from index pages
           pageIndex: pIdx, // store the actual page index for linking
           section: "original",
-        }))
-      )
+        })),
+      ),
     );
 
     // Add appendix entries if they exist
@@ -468,13 +503,13 @@ async function combinePDFs(instrument) {
               .replace(/\.png$/i, "")
               .replace(
                 new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"),
-                ""
+                "",
               ),
             page: originalPages.length + pIdx + 1,
             pageIndex: originalPages.length + pIdx,
             section: "appendix",
-          }))
-        )
+          })),
+        ),
       );
     }
 
@@ -483,10 +518,10 @@ async function combinePDFs(instrument) {
       a.title.localeCompare(b.title, undefined, {
         numeric: true,
         sensitivity: "base",
-      })
+      }),
     );
 
-    // Render index pages now
+    // Render index pages now — two-column layout
     let idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
     let idxCtx = pdfWriter.startPageContentContext(idxPage);
     let y = pageHeight - margin.top;
@@ -494,7 +529,7 @@ async function combinePDFs(instrument) {
     // Store all index pages to add links later
     indexPages.push(idxPage);
 
-    const lineSize = 12;
+    const lineSize = 11;
 
     // Title on first index page
     idxCtx.writeText(
@@ -503,13 +538,17 @@ async function combinePDFs(instrument) {
       y,
       {
         font,
-        size: 30,
-      }
+        size: 26,
+      },
     );
     y -= titleGap;
 
-    const columnWidth = contentWidth / 2;
-    const columnRight = margin.left + columnWidth;
+    const colGap = 20; // gap between left and right columns
+    const columnWidth = (contentWidth - colGap) / 2;
+    const col1Left = margin.left;
+    const col1Right = col1Left + columnWidth;
+    const col2Left = col1Right + colGap;
+    const col2Right = col2Left + columnWidth;
     const gap = 6;
     const dotChar = ".";
     let dotWidth = 0;
@@ -517,29 +556,42 @@ async function combinePDFs(instrument) {
       dotWidth = font.calculateTextDimensions(dotChar, lineSize).width || 0;
     } catch (_) {}
 
+    // Track which column we're in: 0 = left, 1 = right
+    let currentCol = 0;
+    const colStartY = y; // remember top of columns for right column start
+
     for (const item of sorted) {
       if (y < margin.bottom + lineHeight) {
-        // close current index page (no page number on index pages)
-        // Add date to all pages
-        drawDate(idxCtx);
-        pdfWriter.writePage(idxPage);
-        pageIndex++;
+        if (currentCol === 0) {
+          // Switch to right column
+          currentCol = 1;
+          y = colStartY;
+        } else {
+          // Both columns full — new page
+          drawDate(idxCtx);
+          pdfWriter.writePage(idxPage);
+          pageIndex++;
 
-        // start a new index page (no title on subsequent pages)
-        idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
-        idxCtx = pdfWriter.startPageContentContext(idxPage);
-        indexPages.push(idxPage); // Store for link creation later
-        y = pageHeight - margin.top;
+          idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
+          idxCtx = pdfWriter.startPageContentContext(idxPage);
+          indexPages.push(idxPage);
+          y = pageHeight - margin.top;
+          currentCol = 0;
+        }
       }
+
+      // Determine column boundaries
+      const colLeft = currentCol === 0 ? col1Left : col2Left;
+      const colRight = currentCol === 0 ? col1Right : col2Right;
 
       const pageText = String(item.page);
       let numWidth = 0;
       try {
         numWidth = font.calculateTextDimensions(pageText, lineSize).width || 0;
       } catch (_) {}
-      const numX = columnRight - numWidth;
+      const numX = colRight - numWidth;
 
-      let maxTitleWidth = numX - margin.left - gap - (dotWidth || 3);
+      let maxTitleWidth = numX - colLeft - gap - (dotWidth || 3);
 
       let titleText = item.title;
       try {
@@ -564,7 +616,7 @@ async function combinePDFs(instrument) {
 
         // Compute dot leader
         const titleWidth = tWidth;
-        const dotStartX = margin.left + titleWidth + gap;
+        const dotStartX = colLeft + titleWidth + gap;
         const safetyPad = 2;
         const maxDotsWidth = Math.max(0, numX - gap - dotStartX - safetyPad);
 
@@ -597,13 +649,13 @@ async function combinePDFs(instrument) {
         // Handle separators differently - draw without dots or page numbers
         if (item.isSeparator) {
           // Draw separator with centered text and no clickable link
-          idxCtx.writeText(titleText, margin.left, y, {
+          idxCtx.writeText(titleText, colLeft, y, {
             font,
             size: lineSize + 2,
           });
         } else {
-          // Draw: title (left), dots (middle), page number (right edge of half column)
-          idxCtx.writeText(titleText, margin.left, y, { font, size: lineSize });
+          // Draw: title (left), dots (middle), page number (right edge of column)
+          idxCtx.writeText(titleText, colLeft, y, { font, size: lineSize });
           if (dots)
             idxCtx.writeText(dots, dotStartX, y, { font, size: lineSize });
           idxCtx.writeText(pageText, numX, y, { font, size: lineSize });
@@ -612,14 +664,14 @@ async function combinePDFs(instrument) {
           // We'll need to update this link later once we have the page objects
           const linkHeight = lineHeight;
           const linkY = y - 2; // slight adjustment for better click area
-          const linkWidth = columnRight - margin.left;
+          const linkWidth = colRight - colLeft;
 
           // Store link info for later (after we create the image pages)
           if (!idxPage._linkAnnotations) {
             idxPage._linkAnnotations = [];
           }
           idxPage._linkAnnotations.push({
-            x: margin.left,
+            x: colLeft,
             y: linkY,
             width: linkWidth,
             height: linkHeight,
@@ -628,7 +680,7 @@ async function combinePDFs(instrument) {
         }
       } catch (_) {
         // Fallback: just draw minimally if anything fails
-        idxCtx.writeText(titleText, margin.left, y, { font, size: lineSize });
+        idxCtx.writeText(titleText, colLeft, y, { font, size: lineSize });
         idxCtx.writeText(pageText, numX, y, { font, size: lineSize });
       }
 
@@ -718,86 +770,51 @@ async function combinePDFs(instrument) {
 
       let linkSpacing = 0;
 
-      // Check for link file (can have multiple links, one per line)
+      // Draw QR codes for any links associated with this tune
       if (font) {
         const tuneBaseName = img.filename
           .replace(/\.png$/i, "")
           .replace(
             new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"),
-            ""
+            "",
           );
 
-        const linkFilePath = path.join("trimmed", `${tuneBaseName}_link`);
-
-        if (fs.existsSync(linkFilePath)) {
-          try {
-            const linkContent = fs.readFileSync(linkFilePath, "utf8").trim();
-            if (linkContent) {
-              // Split by newlines to handle multiple links
-              const links = linkContent
-                .split("\n")
-                .map((line) => line.trim())
-                .filter((line) => line.length > 0);
-
-              const linkSize = 10;
-              const linkColor = [0, 0, 1]; // Blue color for links
-              const lineHeight = 15; // Spacing between links
-              let linkY = y - 15; // Start 15 points below image
-
-              if (!page._linkAnnotations) {
-                page._linkAnnotations = [];
-              }
-
-              for (let i = 0; i < links.length; i++) {
-                let url = links[i];
-
-                // Ensure URL has proper protocol
-                if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                  url = "https://" + url;
-                }
-
-                console.log(`Adding link for ${tuneBaseName}: ${url}`);
-
-                // Calculate text width
-                let linkWidth = 0;
-                try {
-                  linkWidth =
-                    font.calculateTextDimensions(url, linkSize).width || 0;
-                } catch (_) {}
-
-                // Center the link
-                const linkX = margin.left + (contentWidth - linkWidth) / 2;
-
-                // Draw the link text
-                contentContext.writeText(url, linkX, linkY, {
-                  font,
-                  size: linkSize,
-                  colorspace: "rgb",
-                  color: linkColor,
-                });
-
-                // Store link annotation for later processing
-                page._linkAnnotations.push({
-                  x: linkX,
-                  y: linkY - 3,
-                  width: linkWidth,
-                  height: linkSize + 6,
-                  url: url,
-                  isExternalLink: true,
-                });
-
-                // Move down for next link
-                linkY -= lineHeight;
-              }
-
-              linkSpacing = 10 + links.length * lineHeight; // Extra spacing below all links
-            }
-          } catch (error) {
-            console.warn(
-              `Failed to read link file for ${tuneBaseName}:`,
-              error.message
-            );
+        const qrInfos = qrCodeMap.get(tuneBaseName);
+        if (qrInfos && qrInfos.length > 0) {
+          if (!page._linkAnnotations) {
+            page._linkAnnotations = [];
           }
+
+          // Calculate horizontal layout for side-by-side QR codes
+          const totalQRWidth =
+            qrInfos.length * QR_CODE_SIZE + (qrInfos.length - 1) * QR_CODE_GAP;
+          let qrX = margin.left + (contentWidth - totalQRWidth) / 2;
+          const qrBottomY = y - QR_TOP_MARGIN - QR_CODE_SIZE;
+
+          for (const qrInfo of qrInfos) {
+            // Draw QR code image
+            contentContext.drawImage(qrX, qrBottomY, qrInfo.filepath, {
+              transformation: {
+                width: QR_CODE_SIZE,
+                height: QR_CODE_SIZE,
+              },
+            });
+
+            // Add clickable link annotation over QR code area
+            page._linkAnnotations.push({
+              x: qrX,
+              y: qrBottomY,
+              width: QR_CODE_SIZE,
+              height: QR_CODE_SIZE,
+              url: qrInfo.url,
+              isExternalLink: true,
+            });
+
+            console.log(`  QR code for ${tuneBaseName}: ${qrInfo.url}`);
+            qrX += QR_CODE_SIZE + QR_CODE_GAP;
+          }
+
+          linkSpacing = QR_TOP_MARGIN + QR_CODE_SIZE;
         }
       }
 
@@ -867,7 +884,7 @@ async function combinePDFs(instrument) {
               } else {
                 page.node.set(
                   pdfDoc.context.obj("Annots"),
-                  pdfDoc.context.obj([linkAnnotationRef])
+                  pdfDoc.context.obj([linkAnnotationRef]),
                 );
               }
             }
@@ -906,7 +923,7 @@ async function combinePDFs(instrument) {
                   A: {
                     Type: "Action",
                     S: "URI",
-                    URI: pdfDoc.context.obj(linkInfo.url), // Properly encode as PDF string
+                    URI: PDFString.of(linkInfo.url),
                   },
                 });
 
@@ -919,7 +936,7 @@ async function combinePDFs(instrument) {
                 } else {
                   pdfLibPage.node.set(
                     pdfDoc.context.obj("Annots"),
-                    pdfDoc.context.obj([urlLinkRef])
+                    pdfDoc.context.obj([urlLinkRef]),
                   );
                 }
 
@@ -941,20 +958,29 @@ async function combinePDFs(instrument) {
       console.warn("Note: Could not create clickable links:", error.message);
     }
 
+    // Clean up QR temp files
+    try {
+      fs.rmSync(qrTempDir, { recursive: true, force: true });
+    } catch (_) {}
     return; // Exit early since we already called end()
   }
 
   // Finalize the PDF
   pdfWriter.end();
 
+  // Clean up QR temp files
+  try {
+    fs.rmSync(qrTempDir, { recursive: true, force: true });
+  } catch (_) {}
+
   console.log(
-    `${instrument.file}\n   Total pages ${pageIndex}\n   Total Tunes: ${imageFiles.length}`
+    `${instrument.file}\n   Total pages ${pageIndex}\n   Total Tunes: ${imageFiles.length}`,
   );
 }
 
 // Execute the function
 for (const instrument of instruments) {
   combinePDFs(instrument).catch((error) =>
-    console.error(`Error combining images for ${instrument.file}:`, error)
+    console.error(`Error combining images for ${instrument.file}:`, error),
   );
 }

@@ -1,119 +1,89 @@
 #!/bin/bash
 
-# Function to ask yes/no questions (defaults to Yes)
-ask_yes_no() {
-    while true; do
-        read -p "$1 (Y/n): " yn
-        # Default to yes if empty (just pressed Enter)
-        yn=${yn:-y}
-        case $yn in
-            [Yy]* ) return 0;;
-            [Nn]* ) return 1;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-}
+GDRIVE_BOOKLETS="/Users/paulleonard/Google Drive/My Drive/MUSIC/BalFolkFrome/Booklets"
 
-# Function to ask yes/no questions (defaults to No)
-ask_yes_no_default_no() {
-    while true; do
-        read -p "$1 (y/N): " yn
-        # Default to no if empty (just pressed Enter)
-        yn=${yn:-n}
-        case $yn in
-            [Yy]* ) return 0;;
-            [Nn]* ) return 1;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-}
-
-echo "=== Booklet Generation Workflow ==="
+echo "=== Booklet Generation ==="
 echo
-
-# Check if baseline files exist to determine workflow mode
-baseline_exists=false
-if [ -f "baseline_flute.txt" ] || [ -f "baseline_clarinet.txt" ]; then
-    baseline_exists=true
-    echo "📄 Baseline files detected - Appendix mode available"
-    echo "   This will preserve existing booklet structure and add new tunes as appendix"
-else
-    echo "📄 No baseline files found - Full generation mode"
-    echo "   This will create complete booklets from all available tunes"
-fi
+echo "  1) Rebuild everything (full regeneration)"
+echo "  2) Add new tunes to end of booklet"
 echo
+read -p "Choose [1/2]: " choice
 
-# Baseline management options
-if $baseline_exists; then
-    if ask_yes_no_default_no "Reset to full generation mode (delete baseline files)?"; then
-        rm -f baseline_*.txt
-        echo "✓ Baseline files deleted - switching to full generation mode"
-        baseline_exists=false
+case $choice in
+    1)
         echo
-    fi
-else
-    if ask_yes_no "Create baseline files for future appendix mode?"; then
-        if [ -d "trimmed" ] && [ "$(ls -A trimmed 2>/dev/null)" ]; then
-            ./create_baseline.sh
-            baseline_exists=true
-            echo
-        else
-            echo "⚠️  No trimmed files found. Run batch_trim.sh first to create baseline."
-            echo
+        echo "--- Full rebuild ---"
+
+        # Clear all generated artifacts
+        echo "Clearing trimmed/ and booklets/..."
+        rm -rf trimmed/*.png booklets/*.pdf
+        rm -f baseline_*.txt
+
+        # Prepare all scores from MuseScore files
+        echo "Preparing scores..."
+        ./prepare_scores.sh
+
+        # Create baseline from what we just generated
+        echo "Creating baseline..."
+        ./create_baseline.sh
+
+        # Generate booklets
+        echo "Generating booklets..."
+        node src/main.js
+
+        # Copy to Google Drive
+        echo "Copying to Google Drive..."
+        cp booklets/*.pdf "$GDRIVE_BOOKLETS/"
+
+        echo
+        echo "✓ Full rebuild complete"
+        ;;
+
+    2)
+        echo
+        echo "--- Adding new tunes ---"
+
+        # Remove artifacts for tunes NOT in the baseline (i.e. new tunes)
+        # so prepare_scores.sh will regenerate them fresh
+        if [ ! -f "baseline_c.txt" ]; then
+            echo "Error: No baseline files found. Run option 1 first."
+            exit 1
         fi
-    fi
-fi
 
-# Step 1: Fetch latest images from Google Drive
-if ask_yes_no "Fetch latest images from Google Drive (run batch_trim.sh)?"; then
-    echo "Running batch_trim.sh..."
-    ./batch_trim.sh
-    echo "✓ Completed batch_trim.sh"
-    echo
-else
-    echo "Skipping batch_trim.sh"
-    echo
-fi
+        echo "Removing new tune artifacts..."
+        for png in trimmed/*-C-*.png; do
+            [ -e "$png" ] || continue
+            fname=$(basename "$png")
+            if ! grep -qF "$fname" baseline_c.txt; then
+                tune_name="${fname%-C-*}"
+                echo "  Removing: $tune_name"
+                rm -f trimmed/"${tune_name}"-C-*.png
+                rm -f trimmed/"${tune_name}"-Bb-*.png
+                rm -f trimmed/"${tune_name}"-B-*.png
+                rm -f trimmed/"${tune_name}"_link
+            fi
+        done
 
-# Step 2: Run the Node.js script to create booklets
-if ask_yes_no "Generate booklets (run main.js)?"; then
-    if $baseline_exists; then
-        echo "Running main.js in appendix mode..."
-        echo "  - Original tunes will maintain their structure"
-        echo "  - New tunes will be added as appendix with 'New Tunes' header"
-    else
-        echo "Running main.js in full generation mode..."
-        echo "  - All tunes will be included in main booklet"
-    fi
-    node src/main.js
-    echo "✓ Completed main.js"
-    echo
-else
-    echo "Skipping main.js"
-    echo
-fi
+        # Prepare scores (will only process new/missing tunes)
+        echo "Preparing new scores..."
+        ./prepare_scores.sh
 
-# Step 3: Copy the generated booklets to the Google Drive folder
-if ask_yes_no "Copy booklets to Google Drive?"; then
-    echo "Copying to Google Drive..."
-    cp booklets/*.pdf /Users/paulleonard/Google\ Drive/My\ Drive/MUSIC/BalFolkFrome/Booklets/
-    echo "✓ Completed copy to Google Drive"
-    echo
-else
-    echo "Skipping copy to Google Drive"
-    echo
-fi
+        # Generate booklets (baseline files ensure appendix mode)
+        echo "Generating booklets..."
+        node src/main.js
 
-echo "=== Workflow Complete ==="
-echo
-if $baseline_exists; then
-    echo "💡 Tip: To add more tunes in the future:"
-    echo "   1. Add new tune folders to Google Drive"
-    echo "   2. Run ./doit.sh (it will automatically detect and append new tunes)"
-    echo "   3. To start fresh, choose 'Reset to full generation mode' next time"
-else
-    echo "💡 Tip: To use appendix mode in the future:"
-    echo "   1. Run ./doit.sh again and choose 'Create baseline files'"
-    echo "   2. Add new tunes to Google Drive"
-    echo "   3. Run ./doit.sh to generate booklets with appendix"
-fi
+        # Copy to Google Drive
+        echo "Copying to Google Drive..."
+        cp booklets/*.pdf "$GDRIVE_BOOKLETS/"
+
+        echo
+        echo "✓ New tunes added"
+        ;;
+
+    *)
+        echo "Invalid choice. Please run again and choose 1 or 2."
+        exit 1
+        ;;
+esac
+
+echo "=== Done ==="
