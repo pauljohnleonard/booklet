@@ -28,6 +28,51 @@ const QR_PIXELS = 200; // Pixel resolution of generated QR PNG
 const QR_CODE_GAP = 10; // Horizontal gap between side-by-side QR codes
 const QR_TOP_MARGIN = 5; // Vertical space above QR row
 
+// Per-tune dance-type label (small tag above first page of each tune)
+const DANCE_LABEL_SIZE = 8; // Font size for dance-type label beside title
+
+/**
+ * Load dance types from dance_types.json.
+ * Returns the "dances" object: { danceType: [tuneName, ...], ... }
+ */
+function loadDanceTypes() {
+  const danceTypesPath = "dance_types.json";
+  if (!fs.existsSync(danceTypesPath)) {
+    console.warn("dance_types.json not found — dance-type index will be empty");
+    return {};
+  }
+  const data = JSON.parse(fs.readFileSync(danceTypesPath, "utf8"));
+  return data.dances || {};
+}
+
+/**
+ * Build a reverse map: tuneName (lowercase, trimmed) → [danceType, ...].
+ * A tune may appear in multiple dance types.
+ */
+function buildTuneToDanceTypesMap(danceTypes) {
+  const map = new Map();
+  for (const [danceType, tunes] of Object.entries(danceTypes)) {
+    if (danceType === "Unclassified") continue;
+    for (const tune of tunes) {
+      const key = tune.trim().toLowerCase();
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(danceType);
+    }
+  }
+  return map;
+}
+
+/**
+ * Extract the human-readable tune base name from a PNG filename.
+ *   "Batiska-C-1.png"  →  "Batiska"
+ */
+function tuneBaseNameFromFilename(filename, instrumentFile) {
+  return filename
+    .replace(/\.png$/i, "")
+    .replace(new RegExp(`-${escapeRegExp(instrumentFile)}-\\d+$`, "i"), "")
+    .trim();
+}
+
 // Group images into the fewest page-sets using a hybrid strategy:
 // - Best-Fit Decreasing (fast heuristic)
 // - Exact per-page 0/1 knapsack (pseudo-polynomial) to tightly fill each page
@@ -434,7 +479,27 @@ async function combinePDFs(instrument) {
     }
   }
 
+  // Load dance types for labels and dance-type index
+  const danceTypes = loadDanceTypes();
+  const tuneToDanceTypes = buildTuneToDanceTypesMap(danceTypes);
+
   // Add linkSpacing to each image's height for accurate page layout
+  // Also mark first page of each tune and add label spacing
+  const seenTuneNames = new Set();
+  // Sort by filename first so page 1 of each tune is encountered first
+  const allSorted = [...originalImages].sort((a, b) =>
+    a.filename.localeCompare(b.filename, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
+  for (const img of allSorted) {
+    const baseName = tuneBaseNameFromFilename(img.filename, instrument.file);
+    const key = baseName.toLowerCase();
+    img.isFirstPage = !seenTuneNames.has(key);
+    seenTuneNames.add(key);
+  }
+
   originalImages.forEach((img) => {
     img.linkSpacing = linkSpacingMap.get(img.filename) || 0;
   });
@@ -480,12 +545,7 @@ async function combinePDFs(instrument) {
     indexEntries.push(
       ...originalPages.flatMap((items, pIdx) =>
         items.map((img) => ({
-          title: img.filename
-            .replace(/\.png$/i, "")
-            .replace(
-              new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"),
-              "",
-            ),
+          title: tuneBaseNameFromFilename(img.filename, instrument.file),
           page: pIdx + 1, // no offset from index pages
           pageIndex: pIdx, // store the actual page index for linking
           section: "original",
@@ -499,12 +559,7 @@ async function combinePDFs(instrument) {
       indexEntries.push(
         ...appendixPages.flatMap((items, pIdx) =>
           items.map((img) => ({
-            title: img.filename
-              .replace(/\.png$/i, "")
-              .replace(
-                new RegExp(`-${escapeRegExp(instrument.file)}-\\d+$`, "i"),
-                "",
-              ),
+            title: tuneBaseNameFromFilename(img.filename, instrument.file),
             page: originalPages.length + pIdx + 1,
             pageIndex: originalPages.length + pIdx,
             section: "appendix",
@@ -687,14 +742,214 @@ async function combinePDFs(instrument) {
       y -= lineHeight;
     }
 
-    // finalize last index page (no page number on index pages)
-    // Add date to all pages
+    // finalize alphabetical index page
     drawDate(idxCtx);
-
-    // Before writing index pages, we need to create placeholder for links
-    // We'll come back and add them after image pages are created
     pdfWriter.writePage(idxPage);
     pageIndex++;
+
+    // ----------------------------------------------------------------
+    // Dance-Type Index (tunes grouped by dance type)
+    // ----------------------------------------------------------------
+    // Build dance-type → [{title, page, pageIndex}] from index entries
+    const danceTypeIndex = new Map();
+    const seenTunesForDanceType = new Map(); // avoid duplicate entries per dance type
+    for (const entry of indexEntries) {
+      const key = entry.title.trim().toLowerCase();
+      const types = tuneToDanceTypes.get(key) || ["Unclassified"];
+      for (const dt of types) {
+        if (!danceTypeIndex.has(dt)) {
+          danceTypeIndex.set(dt, []);
+          seenTunesForDanceType.set(dt, new Set());
+        }
+        // Only add first occurrence of each tune per dance type
+        if (!seenTunesForDanceType.get(dt).has(key)) {
+          seenTunesForDanceType.get(dt).add(key);
+          danceTypeIndex.get(dt).push(entry);
+        }
+      }
+    }
+
+    // Sort entries within each dance type alphabetically
+    for (const [, entries] of danceTypeIndex) {
+      entries.sort((a, b) =>
+        a.title.localeCompare(b.title, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+    }
+
+    // Dance type names sorted alphabetically, skip empty ones
+    const danceTypeNames = [...danceTypeIndex.keys()]
+      .filter((name) => danceTypeIndex.get(name).length > 0)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+
+    if (danceTypeNames.length > 0) {
+      // Start first dance-type index page
+      idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
+      idxCtx = pdfWriter.startPageContentContext(idxPage);
+      y = pageHeight - margin.top;
+      indexPages.push(idxPage);
+
+      const sectionHeaderLineSize = 13;
+      const sectionHeaderLineHeight = 28;
+
+      // Title
+      idxCtx.writeText("Dance Type Index", margin.left, y, {
+        font,
+        size: 22,
+      });
+      y -= titleGap;
+
+      currentCol = 0;
+      const dtColStartY = y;
+
+      function ensureDtSpace(needed) {
+        if (y >= margin.bottom + needed) return;
+        if (currentCol === 0) {
+          currentCol = 1;
+          y = dtColStartY;
+        } else {
+          drawDate(idxCtx);
+          pdfWriter.writePage(idxPage);
+          pageIndex++;
+
+          idxPage = pdfWriter.createPage(0, 0, pageWidth, pageHeight);
+          idxCtx = pdfWriter.startPageContentContext(idxPage);
+          indexPages.push(idxPage);
+          y = pageHeight - margin.top;
+          currentCol = 0;
+        }
+      }
+
+      for (const dtName of danceTypeNames) {
+        const dtEntries = danceTypeIndex.get(dtName);
+        if (!dtEntries || dtEntries.length === 0) continue;
+
+        // Ensure space for header + at least one entry
+        ensureDtSpace(sectionHeaderLineHeight + lineHeight);
+
+        const colLeft = currentCol === 0 ? col1Left : col2Left;
+
+        // Draw dance-type header
+        idxCtx.writeText(dtName, colLeft, y, {
+          font,
+          size: sectionHeaderLineSize,
+        });
+        y -= sectionHeaderLineHeight;
+
+        // Draw each tune entry
+        for (const item of dtEntries) {
+          ensureDtSpace(lineHeight);
+
+          const cLeft = currentCol === 0 ? col1Left : col2Left;
+          const cRight = currentCol === 0 ? col1Right : col2Right;
+          const entryLeft = cLeft + 8; // indent under header
+
+          const pageText = String(item.page);
+          let numWidth = 0;
+          try {
+            numWidth =
+              font.calculateTextDimensions(pageText, lineSize).width || 0;
+          } catch (_) {}
+          const numX = cRight - numWidth;
+
+          let maxTitleWidth = numX - entryLeft - gap - (dotWidth || 3);
+
+          let titleText = item.title;
+          try {
+            const ellipsis = "…";
+            let tWidth =
+              font.calculateTextDimensions(titleText, lineSize).width || 0;
+            if (tWidth > maxTitleWidth) {
+              let low = 0,
+                high = titleText.length;
+              while (low < high) {
+                const mid = Math.floor((low + high + 1) / 2);
+                const candidate = titleText.slice(0, mid) + ellipsis;
+                const cWidth =
+                  font.calculateTextDimensions(candidate, lineSize).width || 0;
+                if (cWidth <= maxTitleWidth) low = mid;
+                else high = mid - 1;
+              }
+              titleText = titleText.slice(0, low) + ellipsis;
+              tWidth =
+                font.calculateTextDimensions(titleText, lineSize).width || 0;
+            }
+
+            const titleWidth = tWidth;
+            const dotStartX = entryLeft + titleWidth + gap;
+            const safetyPad = 2;
+            const maxDotsWidth = Math.max(
+              0,
+              numX - gap - dotStartX - safetyPad,
+            );
+
+            let dots = "";
+            if (maxDotsWidth > 0) {
+              if (dotWidth > 0) {
+                let count = Math.floor(maxDotsWidth / dotWidth);
+                if (count > 0) {
+                  dots = dotChar.repeat(count);
+                  try {
+                    let dotsWidth =
+                      font.calculateTextDimensions(dots, lineSize).width || 0;
+                    while (dots && dotsWidth > maxDotsWidth) {
+                      dots = dots.slice(0, -1);
+                      dotsWidth =
+                        font.calculateTextDimensions(dots, lineSize).width || 0;
+                    }
+                  } catch (_) {
+                    while (
+                      dots.length > 0 &&
+                      dots.length * dotWidth > maxDotsWidth
+                    )
+                      dots = dots.slice(0, -1);
+                  }
+                }
+              } else {
+                const approxDotWidth = 3;
+                let count = Math.floor(maxDotsWidth / approxDotWidth);
+                if (count > 0) dots = dotChar.repeat(count);
+              }
+            }
+
+            idxCtx.writeText(titleText, entryLeft, y, {
+              font,
+              size: lineSize,
+            });
+            if (dots)
+              idxCtx.writeText(dots, dotStartX, y, { font, size: lineSize });
+            idxCtx.writeText(pageText, numX, y, { font, size: lineSize });
+
+            // Clickable link
+            if (!idxPage._linkAnnotations) {
+              idxPage._linkAnnotations = [];
+            }
+            idxPage._linkAnnotations.push({
+              x: cLeft,
+              y: y - 2,
+              width: cRight - cLeft,
+              height: lineHeight,
+              targetPageIndex: item.pageIndex,
+            });
+          } catch (_) {
+            idxCtx.writeText(titleText, entryLeft, y, {
+              font,
+              size: lineSize,
+            });
+            idxCtx.writeText(pageText, numX, y, { font, size: lineSize });
+          }
+
+          y -= lineHeight;
+        }
+      }
+
+      // Finalize last dance-type index page
+      drawDate(idxCtx);
+      pdfWriter.writePage(idxPage);
+      pageIndex++;
+    }
   }
 
   // Start first image page (after index pages)
@@ -743,6 +998,11 @@ async function combinePDFs(instrument) {
       const wPts = img.width * scale;
       const hPts = img.height * scale;
 
+      // Check if this image needs a dance-type label
+      const baseName = tuneBaseNameFromFilename(img.filename, instrument.file);
+      const types = tuneToDanceTypes.get(baseName.toLowerCase());
+      const needsLabel = img.isFirstPage && types && types.length > 0;
+
       // Safety: if something doesn't fit due to rounding, spill to a new page
       if (currentY - hPts < margin.bottom) {
         if (font) {
@@ -761,8 +1021,23 @@ async function combinePDFs(instrument) {
         imagePageObjects.push(page);
       }
 
+      // Draw dance-type label inline with top of image (to the left)
       const x = margin.left + (contentWidth - wPts) / 2;
       const y = currentY - hPts;
+
+      if (font && needsLabel) {
+        const labelText = `[${types.join(", ")}]`;
+        // Position label so its top aligns with image top (offset down by font size)
+        contentContext.writeText(
+          labelText,
+          margin.left,
+          currentY - DANCE_LABEL_SIZE - 2,
+          {
+            font,
+            size: DANCE_LABEL_SIZE,
+          },
+        );
+      }
 
       contentContext.drawImage(x, y, img.path, {
         transformation: { width: wPts, height: hPts },
@@ -979,8 +1254,12 @@ async function combinePDFs(instrument) {
 }
 
 // Execute the function
-for (const instrument of instruments) {
-  combinePDFs(instrument).catch((error) =>
-    console.error(`Error combining images for ${instrument.file}:`, error),
-  );
-}
+(async () => {
+  for (const instrument of instruments) {
+    try {
+      await combinePDFs(instrument);
+    } catch (error) {
+      console.error(`Error combining images for ${instrument.file}:`, error);
+    }
+  }
+})();

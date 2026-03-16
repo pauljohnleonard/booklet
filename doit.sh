@@ -29,7 +29,7 @@ case $choice in
 
         # Generate booklets
         echo "Generating booklets..."
-        node src/main.js
+        node src/main_optimized.js
 
         # Copy to Google Drive
         echo "Copying to Google Drive..."
@@ -70,7 +70,7 @@ case $choice in
 
         # Generate booklets (baseline files ensure appendix mode)
         echo "Generating booklets..."
-        node src/main.js
+        node src/main_optimized.js
 
         # Copy to Google Drive
         echo "Copying to Google Drive..."

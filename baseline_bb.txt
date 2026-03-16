@@ -1,7 +1,7 @@
 trimmed/Batiska-Bb-1.png
 trimmed/Boite de Jazz-Bb-1.png
 trimmed/Bouffard's Waltzes-Bb-1.png
-trimmed/Bouree de Saint Chart-Bb-1.png
+trimmed/Bouree de Saint Chartier-Bb-1.png
 trimmed/Crested Hens-Bb-1.png
 trimmed/Driving To Halsway-Bb-1.png
 trimmed/Flatbush Waltz-Bb-1.png
@@ -19,7 +19,7 @@ trimmed/Monster Cafe-Bb-1.png
 trimmed/Motorway Mazurka-Bb-1.png
 trimmed/Nina -Bb-1.png
 trimmed/Nordlys Schottish-Bb-1.png
-trimmed/Rondeau -Bb-1.png
+trimmed/Rondeau  du Quercy-Bb-1.png
 trimmed/Rose of Raby-Bb-1.png
 trimmed/Rue des Prés-Bb-1.png
 trimmed/Scottische a Virmoux-Bb-1.png

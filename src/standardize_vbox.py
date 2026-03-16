@@ -17,6 +17,7 @@ What it does:
     - Removes offset elements from title and composer Text blocks
     - Removes positionLinkedToMaster from Text blocks (so excerpts match)
     - Standardizes title and composer fonts (face, size, style)
+    - Standardizes frame text (sub-tune headers) to consistent font/size
     - Preserves all other VBox content (instrument_excerpt text, eids, etc.)
 """
 
@@ -41,26 +42,42 @@ STANDARD_FONTS = {
     "composerLineSpacing": "1",
     "composerFontStyle": "0",
     "composerFontSpatiumDependent": "0",
+    "frameFontFace": "MuseJazz Text",
+    "frameFontSize": "16",
+    "frameLineSpacing": "1",
+    "frameFontStyle": "0",
+    "frameFontSpatiumDependent": "0",
 }
+
+# Standard height for sub-tune VBoxes (smaller than main title VBox)
+SUBTUNE_VBOX_HEIGHT = 3
 
 
 def standardize_vbox_in_mscx(xml_content):
     """
     Standardize all VBox elements in a .mscx XML string.
 
-    - Set height to STANDARD_HEIGHT
+    - Set height to STANDARD_HEIGHT (first VBox) or SUBTUNE_VBOX_HEIGHT (subsequent)
     - Ensure boxAutoSize=0
-    - Remove offset from title and composer Text blocks
+    - Remove offset from title, composer, and frame Text blocks
     - Remove positionLinkedToMaster from Text blocks
+    - Clean up inline font overrides in frame text
     """
+
+    vbox_counter = [0]  # mutable counter for closure
 
     def fix_vbox(vbox_match):
         vbox = vbox_match.group(0)
+        is_first = vbox_counter[0] == 0
+        vbox_counter[0] += 1
+
+        # Use appropriate height based on whether this is the main title or a sub-tune
+        height = STANDARD_HEIGHT if is_first else SUBTUNE_VBOX_HEIGHT
 
         # Standardize height
         vbox = re.sub(
             r"<height>[^<]*</height>",
-            f"<height>{STANDARD_HEIGHT}</height>",
+            f"<height>{height}</height>",
             vbox,
         )
 
@@ -79,20 +96,28 @@ def standardize_vbox_in_mscx(xml_content):
                 vbox,
             )
 
-        # Remove offset elements from title and composer Text blocks
+        # Remove offset elements from title, composer, and frame Text blocks
         # We need to handle each Text block individually
         def fix_text_block(text_match):
             text = text_match.group(0)
-            style_match = re.search(r"<style>(title|composer)</style>", text)
+            style_match = re.search(
+                r"<style>(title|composer|frame)</style>", text)
             if style_match:
                 # Remove offset lines (with any indentation)
-                text = re.sub(r"\s*<offset [^/]*/>\s*\n?", "\n", text)
+                text = re.sub(r"\s*<offset [^/]*/?>\s*\n?", "\n", text)
                 # Remove positionLinkedToMaster lines
                 text = re.sub(
                     r"\s*<positionLinkedToMaster>[^<]*</positionLinkedToMaster>\s*\n?",
                     "\n",
                     text,
                 )
+
+                if style_match.group(1) == "frame":
+                    # Remove <size> element (font size set via style instead)
+                    text = re.sub(r"\s*<size>[^<]*</size>\s*\n?", "\n", text)
+                    # Remove inline font size attributes from <text> content
+                    text = re.sub(r'<font size="[^"]*"/>', "", text)
+
                 # Clean up any resulting blank lines
                 text = re.sub(r"\n\s*\n", "\n", text)
             return text
