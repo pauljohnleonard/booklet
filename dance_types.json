@@ -1,40 +1,56 @@
 {
   "dances": {
-    "An Dro / Hanter Dro": ["Hanter Dro de languidig", "The Wren"],
-    "Bourrée": [
-      "Bouree de Saint Chart",
+    "An Dro / Hanter Dro": [
+      "Hanter Dro de languidig",
+      "The Wren",
+      "The Wren(Gm)",
+      "Theme Vannetaise"
+    ],
+    "Bourrée (Two Time)": [
+      "Bouree de Saint Chartier",
       "Last Chance Bourree",
-      "Two time bourrees",
+      "Monster Cafe",
+      "Two time bourrees"
+    ],
+    "Bourrée (Three Time)": [
       "Crested Hens"
     ],
     "Branle": [],
-    "Chapelloise": ["The RSB"],
-    "Mazurka": ["Mazurka Grand Frise", "Motorway Mazurka", "Les deux freres"],
-    "Polka": [],
-    "Polska": ["Batiska"],
-    "Rond / Rondeau": ["Rondeau"],
+    "Chapelloise": [
+      "The RSB"
+    ],
+    "Mazurka": [
+      "Batiska",
+      "Boite de Jazz",
+      "L’inconnu de Limoise",
+      "Les deux freres",
+      "Ma Mignonne",
+      "Mazurka Grand Frise",
+      "Motorway Mazurka",
+      "Nina",
+      "Rose of Raby"
+    ],
+    "Ronde": [
+      "Rondeau  du Quercy"
+    ],
     "Scottische": [
+      "Hellebore  Too Late to Sleep",
+      "Les doigts de Carmen (Tarif de Nuit)",
       "Nordlys Schottish",
+      "Rue des Prés",
       "Scottische a Virmoux",
+      "Scottish Urbaine - Sunshine",
       "Zelda - Jump at the Sun"
     ],
-    "Waltz": ["Bouffard's Waltzes", "Flatbush Waltz"],
-
-    "Unclassified": [
-      "Scottish Urbaine - Sunshine",
-      "Boite de Jazz",
+    "Waltz": [
+      "Bouffard's Waltzes",
       "Driving To Halsway",
-      "FlatWorld",
-      "Hellebore  Too Late to Sleep",
-      "La Gavre",
-      "Les deux freres",
-      "L'inconnu de Limoise",
-      "Ma Mignonne",
-      "Monster Cafe",
-      "Nina",
-      "Rose of Raby",
-      "Rue des Prés",
-      "Tarif de Nuit"
-    ]
+      "Flatbush Waltz",
+      "FlatWorld"
+    ],
+    "Circassian Circle": [
+      "La Gavre"
+    ],
+    "Unclassified": []
   }
 }
