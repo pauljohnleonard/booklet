@@ -1,0 +1,121 @@
+# Name mappings for dance index
+# Format: variant_name,canonical_name
+# Lines starting with # are comments
+# Edit this file to correct misspellings, merge variants, etc.
+# Then re-run: python3 merge_index.py
+#
+# --- Strip parenthetical country annotations (auto-handled) ---
+# These are handled automatically: "Foo (Israel)" -> "Foo"
+# You only need entries here for actual spelling differences.
+#
+# --- Spelling variants / misspellings ---
+Adje red se redat male,Ajde Red Se Redat Male
+Adjon az Isten,Adjon Az Isten
+Aide Jano,Ajde Jano
+Aide Jano ,Ajde Jano
+Al Sadeinu,Al Sadenu
+Al_Sadenu,Al Sadenu
+Ahavat Hadasa (Is.),Ahvat Hadasa
+Ani Ma Amin (Is.),Ani Ma'amin
+Aptaliko,Aptalikos
+Bat Ha'carmel (Israel),Bat Ha Carmel
+Bells Of Norwich,Bells of Norwich
+The Bells of Norwich,Bells of Norwich
+Branle de L'anneau,Branle de l'Anneau
+Bufcansko (Mac.),Bufchansko
+Buvcansko,Bufchansko
+Dans Vanietais (Brittany),Dans Vanietais
+Dans Vanietais (Modern),Dans Vanietais
+David Melech Yisrael,David Melech Israel
+Dodi li,Dodili
+Dospatsko Horo (Bul.),Dospatsko Horo
+Dospatsko Horo (Bulgaria),Dospatsko Horo
+Dospatsko Oro,Dospatsko Horo
+Eench Eemanaee (Armenia),Eench Eemanee
+Ezeroumi shoror,Erzroomi Shoror
+Freilach,Freylach
+Hana Ava Babanot (Israel),Hanah Avaa Babanot
+Harseneek,Harsaneek
+Hora Verche,Hora Veche
+Hora Miresi,Hora Miresei 1
+Hora Miresi,Hora Miresei 1
+Ianni Mou,Yianni Mou
+Idam Ne Idam (Bulgaria),Idam ne Idam
+Intitusy,Intitusuy
+Irish Mandala.( Brian Borus March ),Irish Mandala
+Jacu (S. Amer.),Jack'u
+Jacu (S. America),Jack'u
+Joc De Leagane,Joc de Leagane
+Joc De Leagane (Rom.),Joc de Leagane
+Jovano Jovanke,Jovano Jonake
+Karagona,Karagouna
+Keizmer,Klezmer
+Klezmer (Israel),Klezmer
+Ketri Ketri (Mac/Gyp.),Ketri Ketri
+Khotinskaya,Kotinskaya
+Kirya Y'feyfifya (Israel),Kirya Y'feyfiya
+Kirya Y'feyfiya (Is.),Kirya Y'feyfiya
+Legnalla Dana,Legnala Dana
+Les Noto,Lesnoto
+"Lesnoto (Mac.) (""Ajde Red Se Redat Male"")",Lesnoto
+Leši (Macedonia),Lesi
+L'alouette (France),L'Allouette
+L'Allouette,L'Allouette
+Ma Na'vu,Ma Navu
+Makedonsko  Devojce,Makedonsko Devojce
+Ma Tanan Sind,Ma Tann Sind
+Mi Yitneni Of (Is.),Mi Yitneni Of
+Mi Yitneni Of (Israel),Mi Yitneni Of
+Mari Marijko,Marie Marijko
+Marie's Wedding,Marie Marijko
+Mahar (Is.),Masar
+Menoussis,Menousis
+Misirlou(tango),Misirlou
+Offering Govand (SKIES KAI XROMATA),Offering Govand
+Ola Ta Melachroina,Ola Te Melachrino
+Omrim Yeshna Eretz (Israel),Omrin Yeshna Eretz
+Omrin Yeshna Eretz (Is.),Omrin Yeshna Eretz
+Ooseka Gookas,Ooska Gookis
+Oruro,Ouro
+Pasito Del Moreno (S. Amer.),Pasito Del Marino
+Pera Stous Pera Kambos (Gr.),Perastous Pera Kambous
+Perastous Pera Kambous,Perastous Pera Kambous
+Pilgrim's Dance,Pilgrims Dance
+Pilgrim's Dance,Pilgrims Dance
+The Pilgrims’ Dance (Spain),Pilgrims Dance
+The Pilgrims' Dance (Spain),Pilgrims Dance
+Sandansko Horo Grz'koto,Sandansko Horo Grzkoto
+Sandansko Horo Grz'koto,Sandansko Horo Grzkoto
+Sano Duso (Vranjanke),Sano Duso
+Sar Plania,Sar Planina
+Sham Harei Golan,Sham Hareh Golan
+Shepherd's Dance,Shepherds Dance
+Shepherd's Dance,Shepherds Dance
+Shepherds’ Dance (France),Shepherds Dance
+Shepherds' Dance (France),Shepherds Dance
+Shifra Tanz,Shifra Tanzt
+Shir al ets,Shir Aletz
+Snošti Večer Jano Mori (Bulgaria),Snosti Vecer Jano Mori
+S'sulam Ya'akov (Israel),Ssulam Ya A'Krov
+Syrtos Plyeas (Gr.),Syrtos Pyleas
+Syrtos Kalamia / Kritikos (Greece),Syrto Kalamia Syrtos Kritikos
+The Four Seasons (England),Four Seasons
+The Herdsman's Dance (We.),The Herdsman's Dance
+The Young Herdsman's Dance (Welsh),The Young Herdsman's Dance
+Trgnalla Rumjana (Bul.),Trgnala Rumjana
+Tsur Chassidit (Israel),Tsur Chassadit
+Valle Permatare (Alb.),Valle Permatore
+Valenki (Russ.),Walenki
+Vasija De Barro,Vasija de Barro
+Zumbai Zumba ba,Zumbaj Zumba Ba
+Ani Ma Amin (Is.),Ani Ma'amin
+Little Lemon Tree (Greece),Little Lemon Tree (Gr.)
+#
+# --- These are DIFFERENT dances (do NOT merge) ---
+# Andro 1 / Andro 2 / Andro 3 - different tunes
+# Bavno Oro / Bracno Oro - different dances
+# Hora Miresei 1 / Hora Miressei 2 / Hora Miresi - different dances
+# Hora Mare - different dance
+# Laride 1 / Laride 2 - different tunes
+# Pravo Horo / Pravo Oro - different dances
+# Tsamikos / Tsamikos (Gentle) - may be different
